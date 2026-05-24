@@ -2,7 +2,9 @@ name: Coursive ticket watcher
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # toutes les 5 minutes (granularité min sur GH Actions)
+    # Toutes les 5 min. Décalage de 2 min vs. heure pleine pour éviter le pic
+    # de charge GH Actions sur les minutes rondes (cron y est plus souvent retardé).
+    - cron: "2-59/5 * * * *"
   workflow_dispatch: {}      # bouton "Run workflow" manuel
   push:
     branches: [main]
