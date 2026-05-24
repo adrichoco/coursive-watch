@@ -26,6 +26,7 @@ Run modes:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -34,6 +35,7 @@ import smtplib
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from email.message import EmailMessage
@@ -129,6 +131,138 @@ PAST_MARKER_RE = re.compile(
 )
 
 
+# ---------- enrichment from la-coursive.com institutional site ----------
+
+COURSIVE_SITEMAP = "https://www.la-coursive.com/sitemap.xml"
+COURSIVE_SEARCH = "https://www.la-coursive.com/?s="
+DISCIPLINE_HINTS = {
+    "danse", "musique", "théâtre", "theatre", "cirque", "nouveau cirque",
+    "cinéma", "cinema", "humour", "marionnette", "mime", "opéra", "opera",
+    "performance", "concert", "lecture", "exposition", "conférence",
+    "conference", "jeune public", "famille", "théâtre jeune public",
+    "jazz", "rock", "pop", "classique", "musique classique", "electro",
+    "world music", "musique du monde", "chanson", "slam", "conte",
+    "récit", "récital", "recital",
+}
+
+
+def _norm(s: str) -> str:
+    """Loose key used to match a show title against a la-coursive.com slug."""
+    return re.sub(r"[^a-z0-9]+", "", s.lower())
+
+
+def fetch_show_index() -> dict[str, str]:
+    """Build {title_key: detail_url} from sitemap.xml (canonical, full season)."""
+    try:
+        with urllib.request.urlopen(COURSIVE_SITEMAP, timeout=15) as resp:
+            sm = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        log(f"WARN sitemap fetch failed: {type(e).__name__}: {e}")
+        return {}
+    out: dict[str, str] = {}
+    for m in re.finditer(r"<loc>(https://www\.la-coursive\.com/projects/([^/<]+)/)</loc>", sm):
+        url = m.group(1)
+        slug = re.sub(r"-\d{2}-\d{2}$", "", m.group(2))
+        out.setdefault(_norm(slug), url)
+    return out
+
+
+def search_show_url(title: str) -> str | None:
+    """Fallback: use the WordPress site search to find a show URL by title."""
+    q = urllib.parse.quote_plus(title)
+    try:
+        with urllib.request.urlopen(COURSIVE_SEARCH + q, timeout=15) as resp:
+            page = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        log(f"WARN search fetch failed for {title!r}: {type(e).__name__}: {e}")
+        return None
+    m = re.search(r'href="(https://www\.la-coursive\.com/projects/[^/"]+/)', page)
+    return m.group(1) if m else None
+
+
+def fetch_show_context(detail_url: str) -> dict | None:
+    """Return {'disciplines': [...], 'tagline': '...'} from a show detail page."""
+    try:
+        with urllib.request.urlopen(detail_url, timeout=15) as resp:
+            page_html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        log(f"WARN show detail fetch failed for {detail_url}: {type(e).__name__}: {e}")
+        return None
+    text = re.sub(r"<script.*?</script>", " ", page_html, flags=re.S | re.I)
+    text = re.sub(r"<style.*?</style>", " ", text, flags=re.S | re.I)
+    # Block-level tags -> newline. Inline tags (span/em/strong/a/i/b/...) -> empty string,
+    # so "Th</strong><strong>éâ" becomes "Théâ" and not "Th éâ".
+    text = re.sub(
+        r"</?(p|div|br|h[1-6]|li|tr|td|article|section|header|footer|nav|figure|main|aside|ul|ol)[^>]*>",
+        "\n", text, flags=re.I,
+    )
+    text = re.sub(r"<[^>]+>", "", text)
+    lines = [html.unescape(re.sub(r"\s+", " ", l)).strip() for l in text.split("\n")]
+    lines = [l for l in lines if l]
+    # Layout: <title> <company> <disc1> [<disc2>...] [<country>] PRÉCÉDENT SUIVANT <tagline...>
+    nav_idx = next((i for i, l in enumerate(lines) if "PRÉCÉDENT" in l), -1)
+    if nav_idx < 0:
+        return None
+    prev_idx = nav_idx
+    suivant_idx = nav_idx  # tagline scan starts right after the nav line
+    # Disciplines: strict match against the known label set, in the window above PRÉCÉDENT.
+    window = lines[max(0, prev_idx - 6):prev_idx]
+    disciplines = []
+    seen: set[str] = set()
+    for l in window:
+        key = l.lower().strip()
+        if key in DISCIPLINE_HINTS and key not in seen:
+            disciplines.append(l.capitalize())
+            seen.add(key)
+    # First "real" sentence after SUIVANT is the tagline. Skip credits, dates, all-caps.
+    tagline = ""
+    for l in lines[suivant_idx + 1 : suivant_idx + 12]:
+        if len(l) < 40 or " " not in l:
+            continue
+        if l.startswith("©") or l.isupper():
+            continue
+        tagline = l.rstrip(" .;,")
+        break
+    # Trim tagline to ~160 chars at a word boundary.
+    if len(tagline) > 160:
+        cut = tagline[:160].rsplit(" ", 1)[0]
+        tagline = cut + "…"
+    return {"disciplines": disciplines[:3], "tagline": tagline}
+
+
+def context_line(ctx: dict | None) -> str:
+    """Render the enrichment to a single human-readable line."""
+    if not ctx:
+        return ""
+    parts = []
+    if ctx.get("disciplines"):
+        parts.append(" · ".join(d.capitalize() for d in ctx["disciplines"]))
+    if ctx.get("tagline"):
+        parts.append(ctx["tagline"])
+    return " — ".join(parts)
+
+
+def enrich(shows: list[dict], prev: dict) -> None:
+    """Populate `context` on each show. Reuses prev cache; fetches only on miss."""
+    index_cache: dict[str, str] | None = None
+    for s in shows:
+        cached = prev.get(s["id"], {}).get("context")
+        if cached is not None:
+            s["context"] = cached
+            continue
+        if index_cache is None:
+            index_cache = fetch_show_index()
+        key = _norm(s["title"])
+        url = index_cache.get(key) or search_show_url(s["title"])
+        ctx: dict | None = None
+        if url:
+            ctx = fetch_show_context(url)
+            if ctx:
+                ctx["url"] = url
+        s["context"] = ctx or {}
+        log(f"enriched {s['id']} {s['title']!r}: {context_line(s['context']) or '(no match)'}")
+
+
 def classify(cls_attr: str) -> str:
     tokens = cls_attr.split()
     for s in ("warning", "beware", "valid"):
@@ -192,11 +326,17 @@ def macos_notify(subject: str, body: str, open_browser: bool) -> None:
 def render_email_html(events: list[dict]) -> str:
     rows = []
     for e in events:
+        ctx = (e.get("context") or "").strip()
+        ctx_html = (
+            f"<div style='color:#666;font-size:13px;margin-top:2px'>{ctx}</div>"
+            if ctx else ""
+        )
         rows.append(
             f"<tr>"
-            f"<td style='padding:8px 12px;border-bottom:1px solid #eee'><b>{e['title']}</b></td>"
-            f"<td style='padding:8px 12px;border-bottom:1px solid #eee;color:#555'>{e['date']}</td>"
-            f"<td style='padding:8px 12px;border-bottom:1px solid #eee'>{e['transition']}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #eee'>"
+            f"<b>{e['title']}</b>{ctx_html}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #eee;color:#555;white-space:nowrap'>{e['date']}</td>"
+            f"<td style='padding:10px 12px;border-bottom:1px solid #eee'>{e['transition']}</td>"
             f"</tr>"
         )
     body_rows = "".join(rows) or "<tr><td>(aucun)</td></tr>"
@@ -270,7 +410,9 @@ def send_ntfy(events: list[dict]) -> bool:
 
     ok_any = False
     for e in events:
-        body = f"{e['title']} ({e['date']})\n{e['transition']}\n\nTap pour reserver."
+        ctx = (e.get("context") or "").strip()
+        ctx_line = f"\n{ctx}" if ctx else ""
+        body = f"{e['title']}{ctx_line}\n{e['date']} · {e['transition']}\n\nTap pour reserver."
         req = urllib.request.Request(
             f"{server}/{topic}",
             data=body.encode("utf-8"),
@@ -317,7 +459,7 @@ def deliver(events: list[dict], open_browser: bool) -> None:
 
 
 def diff(prev: dict, shows: list[dict]) -> list[dict]:
-    """Return list of alert events (title, date, transition)."""
+    """Return list of alert events (title, date, transition, context)."""
     events = []
     for s in shows:
         sid = s["id"]
@@ -329,6 +471,7 @@ def diff(prev: dict, shows: list[dict]) -> list[dict]:
                     "title": s["title"],
                     "date": s["date"],
                     "transition": f"nouveau en vente — {STATUS_LABEL.get(status, status)}",
+                    "context": context_line(s.get("context")),
                 })
             continue
         prev_status = before.get("status", "unknown")
@@ -337,6 +480,7 @@ def diff(prev: dict, shows: list[dict]) -> list[dict]:
                 "title": s["title"],
                 "date": s["date"],
                 "transition": f"{STATUS_LABEL.get(prev_status, prev_status)} -> {STATUS_LABEL.get(status, status)}",
+                "context": context_line(s.get("context")),
             })
     return events
 
@@ -351,6 +495,7 @@ def run_once(prev: dict, *, baseline: bool, open_browser: bool) -> dict:
         f"poll ok ({len(shows)} shows): "
         + " | ".join(f"{s['title']}={s['status']}" for s in shows)
     )
+    enrich(shows, prev)
     if baseline:
         log("baseline captured, no alerts on first run")
     else:

@@ -1,35 +1,78 @@
 {
   "1428": {
+    "context": {
+      "disciplines": [
+        "Danse",
+        "Musique"
+      ],
+      "tagline": "Au Portugal, le fado est sur toutes les lèvres. Mais on a oublié qu’une danse l’accompagnait autrefois, jusqu’à tomber dans l’oubli. Le duo Jonas&Lander…",
+      "url": "https://www.la-coursive.com/projects/bate-fado-25-26/"
+    },
     "date": "du 26 au 27/05/2026",
     "id": "1428",
     "status": "beware",
     "title": "BATE FADO"
   },
   "1429": {
+    "context": {
+      "disciplines": [
+        "Théâtre jeune public"
+      ],
+      "tagline": "Florence Lavaud revisite le célèbre conte, en usant d’un théâtre visuel et sensuel, aux images d’une esthétique captivante. Tout est là pour évoquer ce…",
+      "url": "https://www.la-coursive.com/projects/un-petit-chaperon-rouge-25-26/"
+    },
     "date": "le 28/05/2026",
     "id": "1429",
     "status": "valid",
     "title": "UN PETIT CHAPERON ROUGE"
   },
   "1430": {
+    "context": {
+      "disciplines": [
+        "Jazz"
+      ],
+      "tagline": "Champions du monde du groove toutes catégories, les musiciens américains de Ghost-Note le sont assurément ! Leur funk hyper millimétré aux arrangements…",
+      "url": "https://www.la-coursive.com/projects/ghost-note-25-26/"
+    },
     "date": "le 28/05/2026",
     "id": "1430",
     "status": "beware",
     "title": "GHOST NOTE"
   },
   "1431": {
+    "context": {
+      "disciplines": [
+        "Nouveau cirque"
+      ],
+      "tagline": "Étienne Manceau et Mathieu Despoisse, artistes de cirque, digressent entre amis sur la thématique amoureuse du couple. Sous l’angle de l’humour et du défi, ils…",
+      "url": "https://www.la-coursive.com/projects/pling-klang-25-26/"
+    },
     "date": "du 02 au 06/06/2026",
     "id": "1431",
     "status": "valid",
     "title": "PLING-KLANG"
   },
   "1432": {
+    "context": {
+      "disciplines": [
+        "Théâtre"
+      ],
+      "tagline": "Après sa série feuilletonesque Les Trois Mousquetaires, programmée par La Coursive en juin 2023 et 2024, Clara Hédouin nous propose une nouvelle épopée…",
+      "url": "https://www.la-coursive.com/projects/que-ma-joie-demeure-25-26/"
+    },
     "date": "du 06 au 07/06/2026",
     "id": "1432",
     "status": "beware",
     "title": "QUE MA JOIE DEMEURE"
   },
   "1433": {
+    "context": {
+      "disciplines": [
+        "Danse"
+      ],
+      "tagline": "Entre danse contemporaine, hip-hop et gestes ancestraux venus du Maghreb, Fouad Boussouf invente un langage corporel intense et organique, traversé de…",
+      "url": "https://www.la-coursive.com/projects/feu-25-26/"
+    },
     "date": "du 09 au 10/06/2026",
     "id": "1433",
     "status": "valid",
