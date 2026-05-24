@@ -1,0 +1,63 @@
+name: Coursive ticket watcher
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # toutes les 5 minutes (granularité min sur GH Actions)
+  workflow_dispatch: {}      # bouton "Run workflow" manuel
+  push:
+    branches: [main]
+    paths: [watch.py, .github/workflows/watch.yml]
+
+permissions:
+  contents: write   # pour committer state.json après chaque run
+
+concurrency:
+  group: coursive-watch
+  cancel-in-progress: false   # ne pas tuer un poll en cours
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Chromium
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends chromium-browser || \
+            sudo snap install chromium
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run watcher
+        env:
+          CI: "true"
+          CHROME_BIN: /usr/bin/chromium-browser
+          COURSIVE_STATE: ${{ github.workspace }}/state.json
+          COURSIVE_LOG:   ${{ github.workspace }}/watch.log
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO:   ${{ secrets.MAIL_TO }}
+        run: python3 watch.py --once
+
+      - name: Persist state.json
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name  "coursive-watch[bot]"
+            git config user.email "coursive-watch@users.noreply.github.com"
+            git add state.json
+            git commit -m "state: $(date -u +%Y-%m-%dT%H:%MZ)"
+            # retry once on push race with a concurrent run
+            git push || (git pull --rebase && git push)
+          else
+            echo "no state change"
+          fi
