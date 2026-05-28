@@ -1,30 +1,4 @@
 {
-  "1429": {
-    "context": {
-      "disciplines": [
-        "Théâtre jeune public"
-      ],
-      "tagline": "Florence Lavaud revisite le célèbre conte, en usant d’un théâtre visuel et sensuel, aux images d’une esthétique captivante. Tout est là pour évoquer ce…",
-      "url": "https://www.la-coursive.com/projects/un-petit-chaperon-rouge-25-26/"
-    },
-    "date": "le 28/05/2026",
-    "id": "1429",
-    "status": "unknown",
-    "title": "UN PETIT CHAPERON ROUGE"
-  },
-  "1430": {
-    "context": {
-      "disciplines": [
-        "Jazz"
-      ],
-      "tagline": "Champions du monde du groove toutes catégories, les musiciens américains de Ghost-Note le sont assurément ! Leur funk hyper millimétré aux arrangements…",
-      "url": "https://www.la-coursive.com/projects/ghost-note-25-26/"
-    },
-    "date": "le 28/05/2026",
-    "id": "1430",
-    "status": "beware",
-    "title": "GHOST NOTE"
-  },
   "1431": {
     "context": {
       "disciplines": [
