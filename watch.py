@@ -405,7 +405,7 @@ def send_ntfy(events: list[dict]) -> bool:
     topic = os.environ.get("NTFY_TOPIC")
     if not topic:
         return False
-    server = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
+    server = (os.environ.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
     token = os.environ.get("NTFY_TOKEN")  # optional, for self-hosted auth
 
     ok_any = False
