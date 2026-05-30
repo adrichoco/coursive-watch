@@ -10,7 +10,8 @@
     "date": "du 02 au 06/06/2026",
     "id": "1431",
     "status": "valid",
-    "title": "PLING-KLANG"
+    "title": "PLING-KLANG",
+    "url": "https://la-coursive.notre-billetterie.com/billets?kld=2526"
   },
   "1432": {
     "context": {
@@ -23,7 +24,8 @@
     "date": "du 06 au 07/06/2026",
     "id": "1432",
     "status": "valid",
-    "title": "QUE MA JOIE DEMEURE"
+    "title": "QUE MA JOIE DEMEURE",
+    "url": "https://la-coursive.notre-billetterie.com/billets?kld=2526"
   },
   "1433": {
     "context": {
@@ -36,6 +38,7 @@
     "date": "du 09 au 10/06/2026",
     "id": "1433",
     "status": "valid",
-    "title": "FEU"
+    "title": "FEU",
+    "url": "https://la-coursive.notre-billetterie.com/billets?kld=2526"
   }
 }
