@@ -41,10 +41,43 @@ from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
 
-URL = os.environ.get(
-    "COURSIVE_URL",
-    "https://la-coursive.notre-billetterie.com/billets?kld=2526",
+BILLETTERIE_BASE = os.environ.get(
+    "COURSIVE_BILLETTERIE",
+    "https://la-coursive.notre-billetterie.com/billets",
 )
+
+
+def season_codes(now: datetime) -> list[str]:
+    """kld codes for the current + next cultural season (autumn-anchored).
+
+    Season "2025/26" -> code "2526". Before August we're still in the
+    (year-1)/year season; from August we've rolled into year/(year+1).
+    Watching current + next makes the rollover automatic: the new season is
+    already covered before it opens, and the old one drops out once empty.
+    """
+    start = now.year if now.month >= 8 else now.year - 1
+    return [f"{s % 100:02d}{(s + 1) % 100:02d}" for s in (start, start + 1)]
+
+
+def season_urls() -> list[str]:
+    """Billetterie URLs to poll. Precedence:
+    COURSIVE_URL (explicit single URL, back-compat) >
+    COURSIVE_SEASONS (csv of kld codes) >
+    date-derived current+next season codes.
+    """
+    explicit = os.environ.get("COURSIVE_URL")
+    if explicit:
+        return [explicit]
+    override = os.environ.get("COURSIVE_SEASONS")
+    codes = (
+        [c.strip() for c in override.split(",") if c.strip()]
+        if override else season_codes(datetime.now())
+    )
+    return [f"{BILLETTERIE_BASE}?kld={c}" for c in codes]
+
+
+# Primary booking URL for message CTAs / fallbacks (current season).
+URL = season_urls()[0]
 STATE_FILE = Path(os.environ.get("COURSIVE_STATE", str(Path.home() / "coursive-watch" / "state.json")))
 LOG_FILE = Path(os.environ.get("COURSIVE_LOG", str(STATE_FILE.parent / "watch.log")))
 
@@ -87,7 +120,7 @@ def log(msg: str) -> None:
         pass  # logs are best-effort; never fail the run on log I/O
 
 
-def render() -> str:
+def render(url: str) -> str:
     chrome = find_chrome()
     cmd = [
         chrome,
@@ -100,7 +133,7 @@ def render() -> str:
         "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         "--dump-dom",
-        URL,
+        url,
     ]
     proc = subprocess.run(cmd, capture_output=True, timeout=90, text=True)
     if proc.returncode != 0 or not proc.stdout:
@@ -324,6 +357,7 @@ def macos_notify(subject: str, body: str, open_browser: bool) -> None:
 
 
 def render_email_html(events: list[dict]) -> str:
+    cta = (events[0].get("url") if events else None) or URL
     rows = []
     for e in events:
         ctx = (e.get("context") or "").strip()
@@ -345,7 +379,7 @@ def render_email_html(events: list[dict]) -> str:
   <div style="max-width:600px;margin:auto;background:#fff;border-radius:12px;padding:28px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
     <h2 style="margin:0 0 6px 0;color:#0fb155">Des places se sont liberees a La Coursive</h2>
     <p style="color:#666;margin:0 0 20px 0">Clique sur le bouton pour aller reserver tout de suite.</p>
-    <a href="{URL}" style="display:inline-block;background:#0fb155;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:16px">Reserver maintenant</a>
+    <a href="{cta}" style="display:inline-block;background:#0fb155;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:16px">Reserver maintenant</a>
     <table style="border-collapse:collapse;width:100%;margin-top:24px;font-size:14px">
       <thead><tr style="text-align:left;color:#888;font-weight:500">
         <th style="padding:8px 12px;border-bottom:2px solid #eee">Spectacle</th>
@@ -355,7 +389,7 @@ def render_email_html(events: list[dict]) -> str:
       <tbody>{body_rows}</tbody>
     </table>
     <p style="color:#999;font-size:12px;margin-top:24px">
-      <a href="{URL}" style="color:#666">{URL}</a>
+      <a href="{cta}" style="color:#666">{cta}</a>
     </p>
   </div>
 </body></html>"""
@@ -382,7 +416,7 @@ def send_email(events: list[dict]) -> bool:
     text_body = (
         "Des places se sont liberees a La Coursive :\n\n"
         + "\n".join(f"- {e['title']} ({e['date']}) — {e['transition']}" for e in events)
-        + f"\n\nReserver : {URL}\n"
+        + f"\n\nReserver : {(events[0].get('url') if events else None) or URL}\n"
     )
     msg.set_content(text_body)
     msg.add_alternative(render_email_html(events), subtype="html")
@@ -412,6 +446,7 @@ def send_ntfy(events: list[dict]) -> bool:
     for e in events:
         ctx = (e.get("context") or "").strip()
         ctx_line = f"\n{ctx}" if ctx else ""
+        click = e.get("url") or URL
         body = f"{e['title']}{ctx_line}\n{e['date']} · {e['transition']}\n\nTap pour reserver."
         req = urllib.request.Request(
             f"{server}/{topic}",
@@ -421,8 +456,8 @@ def send_ntfy(events: list[dict]) -> bool:
                 "Title": "Coursive — places liberees".encode("utf-8"),
                 "Priority": "high",
                 "Tags": "tada,ticket",
-                "Click": URL,
-                "Actions": f"view, Reserver, {URL}, clear=true",
+                "Click": click,
+                "Actions": f"view, Reserver, {click}, clear=true",
             },
         )
         if token:
@@ -472,6 +507,7 @@ def diff(prev: dict, shows: list[dict]) -> list[dict]:
                     "date": s["date"],
                     "transition": f"nouveau en vente — {STATUS_LABEL.get(status, status)}",
                     "context": context_line(s.get("context")),
+                    "url": s.get("url", URL),
                 })
             continue
         prev_status = before.get("status", "unknown")
@@ -481,18 +517,32 @@ def diff(prev: dict, shows: list[dict]) -> list[dict]:
                 "date": s["date"],
                 "transition": f"{STATUS_LABEL.get(prev_status, prev_status)} -> {STATUS_LABEL.get(status, status)}",
                 "context": context_line(s.get("context")),
+                "url": s.get("url", URL),
             })
     return events
 
 
 def run_once(prev: dict, *, baseline: bool, open_browser: bool) -> dict:
-    html = render()
-    shows = parse_shows(html)
+    urls = season_urls()
+    shows: list[dict] = []
+    seen: set[str] = set()
+    for url in urls:
+        try:
+            html = render(url)
+        except Exception as e:
+            log(f"WARN render failed for {url}: {type(e).__name__}: {e}")
+            continue
+        for s in parse_shows(html):
+            if s["id"] in seen:  # same show can appear under several gates
+                continue
+            seen.add(s["id"])
+            s["url"] = url
+            shows.append(s)
     if not shows:
-        log("WARN no shows parsed — page structure may have changed, skipping")
+        log(f"WARN no shows parsed across {len(urls)} season url(s) — skipping")
         return prev
     log(
-        f"poll ok ({len(shows)} shows): "
+        f"poll ok ({len(shows)} shows / {len(urls)} season url(s)): "
         + " | ".join(f"{s['title']}={s['status']}" for s in shows)
     )
     enrich(shows, prev)
@@ -527,7 +577,7 @@ def main() -> int:
 
     prev = load_state()
     baseline_needed = not prev
-    log(f"start url={URL} state={STATE_FILE} baseline_needed={baseline_needed} CI={os.environ.get('CI','')}")
+    log(f"start seasons={season_urls()} state={STATE_FILE} baseline_needed={baseline_needed} CI={os.environ.get('CI','')}")
 
     try:
         run_once(prev, baseline=baseline_needed, open_browser=args.open_browser)
